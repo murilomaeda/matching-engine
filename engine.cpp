@@ -1,6 +1,10 @@
 #include<bits/stdc++.h>
 using namespace std;
 
+
+//Relógio para a prioridade: cada ordem nova ou modificada recebe o próximo valor
+int timeNow = 0;
+//Identificador para o vector order
 int id = 0;
 
 
@@ -16,17 +20,18 @@ struct Order
 	//0 - Buy
 	//1 - Sell
 
-	//id aumenta com o tempo, então serve para identificar qual veio antes e qual veio depois
+	//id identifica a ordem (identificador_id) e é o índice dela em orders
+	//time diz quem chegou antes e muda quando a ordem é modificada (perde a prioridade)
 
 	//Preços são guardados como inteiros multiplicados por 100 (10.5 -> 1050) para evitar erro de ponto flutuante,
 	//e divididos por 100 na hora de imprimir
 
 	//Peg com price = 0 está fora do book (não tem preço para seguir)
-	int price, id, qtd, type, side;
+	int price, id, qtd, type, side, time;
 };
 
 //Uso o side pra saber se é para usar maior ou menor
-//Desempate pelo menor id
+//Desempate pelo menor time (quem chegou antes)
 struct Cmp
 {
 	bool operator()(const Order &a, const Order &b) const
@@ -36,7 +41,7 @@ struct Cmp
 			if(a.side == 0) return a.price > b.price;
 			return a.price < b.price;
 		}
-		return a.id < b.id;
+		return a.time < b.time;
 	}
 };
 
@@ -155,7 +160,7 @@ int reference(int side)
 }
 
 //Atualiza o preço das pegs depois de cada comando
-//O id não muda, então a peg mantém a prioridade de quando foi criada
+//O time não muda, então a peg mantém a prioridade de quando foi criada
 void reprice()
 {
 	for(int side = 0; side < 2; side++)
@@ -217,7 +222,7 @@ int main()
 	cout << setprecision(15);
 
 	//para os ids começarem em 1;
-	orders.push_back({0,0,0,0,0});
+	orders.push_back({0,0,0,0,0,0});
 	id = 1;
 
 	string command;
@@ -243,7 +248,7 @@ int main()
 			//Tento dar match nos meus pedidos
 			qtd = match(side, qtd, 0, price);
 
-			orders.push_back({price,id,qtd,0,side});
+			orders.push_back({price,id,qtd,0,side,timeNow++});
 			if(qtd > 0)
 			{
 				if(side == 0) BookBuy.insert(orders[id]);
@@ -290,7 +295,7 @@ int main()
 			cout << "Order created: peg " << ref << " " << type << " " << qtd << " " << prefix << id << "\n";
 
 			//Começa fora do book e o reprice ajusta isso
-			orders.push_back({0,id,qtd,2,side});
+			orders.push_back({0,id,qtd,2,side,timeNow++});
 			if(side == 0) pegBuy.push_back(id);
 			else pegSell.push_back(id);
 			id++;
@@ -313,6 +318,52 @@ int main()
 			orders[x].qtd = 0;
 
 			cout << "Order cancelled\n";
+
+			reprice();
+		}
+		else if(command == "modify")
+		{
+			string word, sid; double p; int qtd;
+			cin >> word >> sid >> p >> qtd;
+
+			if(word != "order" || p <= 0 || qtd <= 0)
+			{
+				cout << "Invalid order. Usage: modify order <id> <price> <qty>\n";
+				skipLine();
+				continue;
+			}
+
+			int x = getId(sid);
+			if(x == -1)
+			{
+				cout << "Order not found\n";
+				continue;
+			}
+
+			//Peg não tem preço dela, então não dá para modificar
+			if(orders[x].type == 2)
+			{
+				cout << "Peg orders cannot be modified\n";
+				continue;
+			}
+
+			int price = toInt(p);
+			int side = orders[x].side;
+
+			//Tiro do book e trato como se fosse ordem nova com o mesmo id:
+			if(side == 0) BookBuy.erase(orders[x]);
+			else BookSell.erase(orders[x]);
+
+			cout << "Order modified: " << (side == 0 ? "buy" : "sell") << " " << qtd << " @ " << toPrice(price) << " " << prefix << x << "\n";
+
+			qtd = match(side, qtd, 0, price);
+
+			orders[x] = {price,x,qtd,0,side,timeNow++};
+			if(qtd > 0)
+			{
+				if(side == 0) BookBuy.insert(orders[x]);
+				else BookSell.insert(orders[x]);
+			}
 
 			reprice();
 		}
