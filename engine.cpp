@@ -20,6 +20,8 @@ struct Order
 
 	//Preços são guardados como inteiros multiplicados por 100 (10.5 -> 1050) para evitar erro de ponto flutuante,
 	//e divididos por 100 na hora de imprimir
+
+	//Peg com price = 0 está fora do book (não tem preço para seguir)
 	int price, id, qtd, type, side;
 };
 
@@ -44,6 +46,9 @@ struct Cmp
 vector<Order> orders;
 
 set<Order,Cmp> BookBuy, BookSell;
+
+//ids das pegs ativas de cada lado
+vector<int> pegBuy, pegSell;
 
 
 //preço digitado -> inteiro (10.5 -> 1050)
@@ -137,8 +142,49 @@ int match(int side, int qtd, int type, int price)
 }
 
 
+//Preço que as pegs de um lado seguem: a melhor ordem desse lado que não é peg
+//Retorna 0 se não tiver nenhuma
+int reference(int side)
+{
+	set<Order,Cmp> &book = (side == 0 ? BookBuy : BookSell);
+
+	for(const Order &o : book)
+		if(o.type != 2) return o.price;
+
+	return 0;
+}
+
+//Atualiza o preço das pegs depois de cada comando
+//O id não muda, então a peg mantém a prioridade de quando foi criada
+void reprice()
+{
+	for(int side = 0; side < 2; side++)
+	{
+		set<Order,Cmp> &book = (side == 0 ? BookBuy : BookSell);
+		vector<int> &pegs = (side == 0 ? pegBuy : pegSell);
+
+		int ref = reference(side);
+
+		vector<int> active;
+		for(int x : pegs)
+		{
+			//peg executada ou cancelada sai da lista
+			if(orders[x].qtd == 0) continue;
+			active.push_back(x);
+
+			if(orders[x].price == ref) continue;
+
+			//tiro do book e coloco de volta com o preço novo
+			//se ref == 0 a peg fica fora do book até aparecer um preço para seguir
+			if(orders[x].price != 0) book.erase(orders[x]);
+			orders[x].price = ref;
+			if(ref != 0) book.insert(orders[x]);
+		}
+		pegs = active;
+	}
+}
+
 //Imprime o Book
-//Imprime o book lado a lado, como no enunciado
 void printBook()
 {
 	cout << left << setw(20) << "Buy" << "| Sell\n";
@@ -194,7 +240,7 @@ int main()
 
 			cout << "Order created: " << type << " " << qtd << " @ " << toPrice(price) << " " << prefix << id << "\n";
 
-			//limit que cruza o book é executada na hora, o que sobrar fica no book
+			//Tento dar match nos meus pedidos
 			qtd = match(side, qtd, 0, price);
 
 			orders.push_back({price,id,qtd,0,side});
@@ -204,6 +250,8 @@ int main()
 				else BookSell.insert(orders[id]);
 			}
 			id++;
+
+			reprice();
 		}
 		else if(command == "market")
 		{
@@ -219,9 +267,35 @@ int main()
 
 			int side = (type == "buy" ? 0 : 1);
 
-			//market nunca fica no book, o que sobrar é descartado
 			int left = match(side, qtd, 1, 0);
 			if(left == qtd) cout << "Market order discarded\n";
+
+			reprice();
+		}
+		else if(command == "peg")
+		{
+			string ref, type; int qtd;
+			cin >> ref >> type >> qtd;
+
+			//Só aceito peg bid buy e peg offer sell
+			if(!((ref == "bid" && type == "buy") || (ref == "offer" && type == "sell")) || qtd <= 0)
+			{
+				cout << "Invalid order. Usage: peg bid buy <qty> | peg offer sell <qty>\n";
+				skipLine();
+				continue;
+			}
+
+			int side = (type == "buy" ? 0 : 1);
+
+			cout << "Order created: peg " << ref << " " << type << " " << qtd << " " << prefix << id << "\n";
+
+			//Começa fora do book e o reprice ajusta isso
+			orders.push_back({0,id,qtd,2,side});
+			if(side == 0) pegBuy.push_back(id);
+			else pegSell.push_back(id);
+			id++;
+
+			reprice();
 		}
 		else if(command == "cancel")
 		{
@@ -239,6 +313,8 @@ int main()
 			orders[x].qtd = 0;
 
 			cout << "Order cancelled\n";
+
+			reprice();
 		}
 		else if(command == "print")
 		{
